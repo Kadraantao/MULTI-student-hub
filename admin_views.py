@@ -7,7 +7,6 @@ import streamlit as st
 from database import get_connection
 
 
-# ------------- Course schedule options -------------
 DAY_OPTIONS = [
     "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
     "Mon - Tue", "Mon - Wed", "Mon - Thu", "Mon - Fri", "Mon - Sat",
@@ -48,7 +47,32 @@ def format_time_slot(start_str: str, duration_min: int) -> str:
     return f"{start.strftime('%H:%M')} - {end.strftime('%H:%M')}"
 
 
-# ================= Entry point =================
+def _fetchall(sql: str, params=None):
+    conn = get_connection()
+    with conn.cursor() as cur:
+        cur.execute(sql, params or ())
+        rows = cur.fetchall()
+    conn.close()
+    return rows
+
+
+def _fetchone(sql: str, params=None):
+    conn = get_connection()
+    with conn.cursor() as cur:
+        cur.execute(sql, params or ())
+        row = cur.fetchone()
+    conn.close()
+    return row
+
+
+def _execute(sql: str, params=None):
+    conn = get_connection()
+    with conn.cursor() as cur:
+        cur.execute(sql, params or ())
+    conn.commit()
+    conn.close()
+
+
 def render_admin():
     user = st.session_state.user
     role_label = "Admin" if user["role"] == "admin" else "Instructor"
@@ -85,39 +109,36 @@ def render_admin():
         admin_course_manager()
 
 
-# ================= Dashboard =================
 def admin_dashboard():
     st.title("Dashboard")
     st.caption("Your own workspace — showing only your courses and students.")
     uid = st.session_state.user["id"]
 
-    conn = get_connection()
-    n_students = conn.execute(
+    n_students = _fetchone(
         """
-        SELECT COUNT(DISTINCT u.id)
+        SELECT COUNT(DISTINCT u.id) AS n
         FROM users u
         JOIN enrollments e ON e.user_id = u.id
         JOIN courses c ON c.id = e.course_id
         WHERE c.instructor_id = %s AND e.status = 'approved' AND u.role = 'student'
         """,
         (uid,),
-    ).fetchone()[0]
-    n_courses = conn.execute(
-        "SELECT COUNT(*) FROM courses WHERE instructor_id = %s", (uid,)
-    ).fetchone()[0]
-    n_pending = conn.execute(
+    )["n"]
+    n_courses = _fetchone(
+        "SELECT COUNT(*) AS n FROM courses WHERE instructor_id = %s", (uid,)
+    )["n"]
+    n_pending = _fetchone(
         """
-        SELECT COUNT(*) FROM enrollments e
+        SELECT COUNT(*) AS n FROM enrollments e
         JOIN courses c ON c.id = e.course_id
         WHERE c.instructor_id = %s AND e.status = 'pending'
         """,
         (uid,),
-    ).fetchone()[0]
-    n_consults = conn.execute(
-        "SELECT COUNT(*) FROM consultations WHERE instructor_id = %s AND status = 'pending'",
+    )["n"]
+    n_consults = _fetchone(
+        "SELECT COUNT(*) AS n FROM consultations WHERE instructor_id = %s AND status = 'pending'",
         (uid,),
-    ).fetchone()[0]
-    conn.close()
+    )["n"]
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("My Students", n_students)
@@ -130,14 +151,14 @@ def admin_dashboard():
     conn = get_connection()
     df = pd.read_sql_query(
         """
-        SELECT code AS Code, name AS Course, room AS Room,
-               schedule_day AS Day, schedule_time AS Time
+        SELECT code AS "Code", name AS "Course", room AS "Room",
+               schedule_day AS "Day", schedule_time AS "Time"
         FROM courses
-        WHERE instructor_id = %s
+        WHERE instructor_id = %(uid)s
         ORDER BY schedule_day, schedule_time
         """,
         conn,
-        params=(uid,),
+        params={"uid": uid},
     )
     conn.close()
     if df.empty:
@@ -146,7 +167,6 @@ def admin_dashboard():
         st.dataframe(df, use_container_width=True, hide_index=True)
 
 
-# ================= Courses =================
 def admin_courses():
     st.title("My Courses")
     st.caption("Only you can see and manage these courses.")
@@ -173,24 +193,19 @@ def admin_courses():
                     duration_min = DURATION_OPTIONS[duration_label]
                     time_str = format_time_slot(start_time, duration_min)
                     try:
-                        conn = get_connection()
-                        conn.execute(
+                        _execute(
                             "INSERT INTO courses (code, name, room, schedule_day, schedule_time, instructor_id) "
                             "VALUES (%s, %s, %s, %s, %s, %s)",
                             (code.upper().strip(), name.strip(), room.strip(), day, time_str, uid),
                         )
-                        conn.commit()
-                        conn.close()
                         st.success(f"Course {code.upper()} created — {day}, {time_str}")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Could not create course: {e}")
 
-    conn = get_connection()
-    courses = conn.execute(
+    courses = _fetchall(
         "SELECT * FROM courses WHERE instructor_id = %s ORDER BY code", (uid,)
-    ).fetchall()
-    conn.close()
+    )
 
     if not courses:
         st.info("You haven't created any courses yet.")
@@ -210,23 +225,16 @@ def admin_courses():
         )
         col1, _ = st.columns([1, 6])
         if col1.button("Delete", key=f"del_{c['id']}"):
-            conn = get_connection()
-            conn.execute(
-                "DELETE FROM courses WHERE id = %s AND instructor_id = %s", (c["id"], uid)
-            )
-            conn.commit()
-            conn.close()
+            _execute("DELETE FROM courses WHERE id = %s AND instructor_id = %s", (c["id"], uid))
             st.rerun()
 
 
-# ================= Enrollment requests =================
 def admin_enrollments():
     st.title("Enrollment Requests")
     st.caption("Approve or reject students who requested to enroll in your courses.")
     uid = st.session_state.user["id"]
 
-    conn = get_connection()
-    rows = conn.execute(
+    rows = _fetchall(
         """
         SELECT e.id, e.status, e.requested_at,
                u.id AS student_id, u.full_name, u.email,
@@ -235,11 +243,10 @@ def admin_enrollments():
         JOIN users u ON u.id = e.user_id
         JOIN courses c ON c.id = e.course_id
         WHERE c.instructor_id = %s
-        ORDER BY (e.status='pending') DESC, e.requested_at DESC
+        ORDER BY (e.status = 'pending') DESC, e.requested_at DESC
         """,
         (uid,),
-    ).fetchall()
-    conn.close()
+    )
 
     if not rows:
         st.info("No enrollment requests yet.")
@@ -270,41 +277,28 @@ def admin_enrollments():
         if r["status"] == "pending":
             c1, c2, _ = st.columns([1, 1, 6])
             if c1.button("✅ Approve", key=f"apv_{r['id']}"):
-                conn = get_connection()
-                conn.execute(
-                    "UPDATE enrollments SET status='approved' WHERE id = %s", (r["id"],)
-                )
-                conn.commit()
-                conn.close()
+                _execute("UPDATE enrollments SET status='approved' WHERE id = %s", (r["id"],))
                 st.rerun()
             if c2.button("❌ Reject", key=f"rej_{r['id']}"):
-                conn = get_connection()
-                conn.execute(
-                    "UPDATE enrollments SET status='rejected' WHERE id = %s", (r["id"],)
-                )
-                conn.commit()
-                conn.close()
+                _execute("UPDATE enrollments SET status='rejected' WHERE id = %s", (r["id"],))
                 st.rerun()
 
 
-# ================= Consultations =================
 def admin_consultations():
     st.title("Consultation Requests")
     st.caption("Students who requested a 1-on-1 consultation with you.")
     uid = st.session_state.user["id"]
 
-    conn = get_connection()
-    rows = conn.execute(
+    rows = _fetchall(
         """
         SELECT co.*, u.full_name, u.email
         FROM consultations co
         JOIN users u ON u.id = co.student_id
         WHERE co.instructor_id = %s
-        ORDER BY (co.status='pending') DESC, co.requested_date, co.requested_time
+        ORDER BY (co.status = 'pending') DESC, co.requested_date, co.requested_time
         """,
         (uid,),
-    ).fetchall()
-    conn.close()
+    )
 
     if not rows:
         st.info("No consultation requests yet.")
@@ -331,34 +325,21 @@ def admin_consultations():
         if r["status"] == "pending":
             c1, c2, _ = st.columns([1, 1, 6])
             if c1.button("✅ Confirm", key=f"con_{r['id']}"):
-                conn = get_connection()
-                conn.execute(
-                    "UPDATE consultations SET status='confirmed' WHERE id = %s", (r["id"],)
-                )
-                conn.commit()
-                conn.close()
+                _execute("UPDATE consultations SET status='confirmed' WHERE id = %s", (r["id"],))
                 st.rerun()
             if c2.button("❌ Decline", key=f"dec_{r['id']}"):
-                conn = get_connection()
-                conn.execute(
-                    "UPDATE consultations SET status='rejected' WHERE id = %s", (r["id"],)
-                )
-                conn.commit()
-                conn.close()
+                _execute("UPDATE consultations SET status='rejected' WHERE id = %s", (r["id"],))
                 st.rerun()
 
 
-# ================= Course Manager =================
 def admin_course_manager():
     st.title("Course Manager")
     st.caption("Manage announcements, attendance, and roster for one of your courses.")
     uid = st.session_state.user["id"]
 
-    conn = get_connection()
-    courses = conn.execute(
+    courses = _fetchall(
         "SELECT * FROM courses WHERE instructor_id = %s ORDER BY code", (uid,)
-    ).fetchall()
-    conn.close()
+    )
 
     if not courses:
         st.info("You haven't created any courses yet. Add one in **Courses** first.")
@@ -380,13 +361,10 @@ def admin_course_manager():
 
 
 def _verify_course_ownership(course_id: int) -> bool:
-    """Defense-in-depth: check that this course belongs to the signed-in instructor."""
     uid = st.session_state.user["id"]
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT 1 FROM courses WHERE id = %s AND instructor_id = %s", (course_id, uid)
-    ).fetchone()
-    conn.close()
+    row = _fetchone(
+        "SELECT 1 AS x FROM courses WHERE id = %s AND instructor_id = %s", (course_id, uid)
+    )
     return row is not None
 
 
@@ -408,25 +386,20 @@ def manage_announcements(course_id: int):
             if not title or not content:
                 st.error("Title and message are required.")
             else:
-                conn = get_connection()
-                conn.execute(
+                _execute(
                     "INSERT INTO announcements (course_id, title, content, type) "
                     "VALUES (%s, %s, %s, %s)",
                     (course_id, title.strip(), content.strip(), ann_type),
                 )
-                conn.commit()
-                conn.close()
                 st.success("Announcement posted.")
                 st.rerun()
 
     st.divider()
     st.subheader("Previous announcements")
-    conn = get_connection()
-    anns = conn.execute(
+    anns = _fetchall(
         "SELECT * FROM announcements WHERE course_id = %s ORDER BY posted_at DESC",
         (course_id,),
-    ).fetchall()
-    conn.close()
+    )
 
     if not anns:
         st.info("No announcements posted yet for this course.")
@@ -447,10 +420,7 @@ def manage_announcements(course_id: int):
             unsafe_allow_html=True,
         )
         if st.button("Delete", key=f"delann_{a['id']}"):
-            conn = get_connection()
-            conn.execute("DELETE FROM announcements WHERE id = %s", (a["id"],))
-            conn.commit()
-            conn.close()
+            _execute("DELETE FROM announcements WHERE id = %s", (a["id"],))
             st.rerun()
 
 
@@ -459,8 +429,7 @@ def manage_attendance(course_id: int):
         st.error("You don't own this course.")
         return
     st.subheader("Record attendance")
-    conn = get_connection()
-    students = conn.execute(
+    students = _fetchall(
         """
         SELECT u.id, u.full_name, u.email
         FROM users u
@@ -469,8 +438,7 @@ def manage_attendance(course_id: int):
         ORDER BY u.full_name
         """,
         (course_id,),
-    ).fetchall()
-    conn.close()
+    )
 
     if not students:
         st.info("No approved students enrolled in this course yet.")
@@ -492,15 +460,17 @@ def manage_attendance(course_id: int):
 
     if st.button("Save attendance", type="primary", key=f"save_att_{course_id}"):
         conn = get_connection()
-        for sid, status in statuses.items():
-            conn.execute(
-                """
-                INSERT INTO attendance (course_id, student_id, date, status)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT(course_id, student_id, date) DO UPDATE SET status = EXCLUDED.status
-                """,
-                (course_id, sid, att_date.isoformat(), status),
-            )
+        with conn.cursor() as cur:
+            for sid, status in statuses.items():
+                cur.execute(
+                    """
+                    INSERT INTO attendance (course_id, student_id, date, status)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (course_id, student_id, date)
+                    DO UPDATE SET status = EXCLUDED.status
+                    """,
+                    (course_id, sid, att_date.isoformat(), status),
+                )
         conn.commit()
         conn.close()
         st.success(f"Attendance saved for {att_date.isoformat()}.")
@@ -510,14 +480,14 @@ def manage_attendance(course_id: int):
     conn = get_connection()
     df = pd.read_sql_query(
         """
-        SELECT a.date AS Date, u.full_name AS Student, a.status AS Status
+        SELECT a.date AS "Date", u.full_name AS "Student", a.status AS "Status"
         FROM attendance a
         JOIN users u ON u.id = a.student_id
-        WHERE a.course_id = %s
+        WHERE a.course_id = %(cid)s
         ORDER BY a.date DESC, u.full_name
         """,
         conn,
-        params=(course_id,),
+        params={"cid": course_id},
     )
     conn.close()
     if df.empty:
@@ -534,15 +504,15 @@ def show_enrolled_students(course_id: int):
     conn = get_connection()
     df = pd.read_sql_query(
         """
-        SELECT u.full_name AS "Full name", u.email AS Email,
+        SELECT u.full_name AS "Full name", u.email AS "Email",
                e.requested_at AS "Enrolled since"
         FROM users u
         JOIN enrollments e ON e.user_id = u.id
-        WHERE e.course_id = %s AND e.status = 'approved'
+        WHERE e.course_id = %(cid)s AND e.status = 'approved'
         ORDER BY u.full_name
         """,
         conn,
-        params=(course_id,),
+        params={"cid": course_id},
     )
     conn.close()
     if df.empty:
