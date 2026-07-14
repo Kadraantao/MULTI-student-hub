@@ -36,7 +36,7 @@ def sign_up(email: str, password: str, full_name: str, role: str = "student"):
 
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT id FROM users WHERE email = ?", (email,))
+    cur.execute("SELECT id FROM users WHERE email = %s", (email,))
     if cur.fetchone():
         conn.close()
         return False, "An account with that email already exists."
@@ -44,7 +44,7 @@ def sign_up(email: str, password: str, full_name: str, role: str = "student"):
     pw_hash, salt = hash_password(password)
     cur.execute(
         "INSERT INTO users (email, password_hash, salt, full_name, role) "
-        "VALUES (?, ?, ?, ?, ?)",
+        "VALUES (%s, %s, %s, %s, %s)",
         (email, pw_hash, salt, full_name, role),
     )
     conn.commit()
@@ -58,7 +58,7 @@ def sign_in(email: str, password: str):
     if not email or not password:
         return None
     conn = get_connection()
-    row = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+    row = conn.execute("SELECT * FROM users WHERE email = %s", (email,)).fetchone()
     conn.close()
     if not row:
         return None
@@ -76,10 +76,10 @@ def sign_in(email: str, password: str):
 
 def create_session(user_id: int, days: int = 30) -> str:
     token = secrets.token_urlsafe(32)
-    expires = (datetime.utcnow() + timedelta(days=days)).isoformat()
+    expires = datetime.utcnow() + timedelta(days=days)
     conn = get_connection()
     conn.execute(
-        "INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)",
+        "INSERT INTO sessions (token, user_id, expires_at) VALUES (%s, %s, %s)",
         (token, user_id, expires),
     )
     conn.commit()
@@ -96,7 +96,7 @@ def get_user_from_session(token: str):
         SELECT u.id, u.email, u.full_name, u.role, s.expires_at
         FROM sessions s
         JOIN users u ON u.id = s.user_id
-        WHERE s.token = ?
+        WHERE s.token = %s
         """,
         (token,),
     ).fetchone()
@@ -104,7 +104,7 @@ def get_user_from_session(token: str):
     if not row:
         return None
     try:
-        exp = datetime.fromisoformat(row["expires_at"])
+        exp = row["expires_at"]
         if exp < datetime.utcnow():
             delete_session(token)
             return None
@@ -122,6 +122,6 @@ def delete_session(token: str):
     if not token:
         return
     conn = get_connection()
-    conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+    conn.execute("DELETE FROM sessions WHERE token = %s", (token,))
     conn.commit()
     conn.close()

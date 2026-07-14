@@ -98,23 +98,23 @@ def admin_dashboard():
         FROM users u
         JOIN enrollments e ON e.user_id = u.id
         JOIN courses c ON c.id = e.course_id
-        WHERE c.instructor_id = ? AND e.status = 'approved' AND u.role = 'student'
+        WHERE c.instructor_id = %s AND e.status = 'approved' AND u.role = 'student'
         """,
         (uid,),
     ).fetchone()[0]
     n_courses = conn.execute(
-        "SELECT COUNT(*) FROM courses WHERE instructor_id = ?", (uid,)
+        "SELECT COUNT(*) FROM courses WHERE instructor_id = %s", (uid,)
     ).fetchone()[0]
     n_pending = conn.execute(
         """
         SELECT COUNT(*) FROM enrollments e
         JOIN courses c ON c.id = e.course_id
-        WHERE c.instructor_id = ? AND e.status = 'pending'
+        WHERE c.instructor_id = %s AND e.status = 'pending'
         """,
         (uid,),
     ).fetchone()[0]
     n_consults = conn.execute(
-        "SELECT COUNT(*) FROM consultations WHERE instructor_id = ? AND status = 'pending'",
+        "SELECT COUNT(*) FROM consultations WHERE instructor_id = %s AND status = 'pending'",
         (uid,),
     ).fetchone()[0]
     conn.close()
@@ -133,7 +133,7 @@ def admin_dashboard():
         SELECT code AS Code, name AS Course, room AS Room,
                schedule_day AS Day, schedule_time AS Time
         FROM courses
-        WHERE instructor_id = ?
+        WHERE instructor_id = %s
         ORDER BY schedule_day, schedule_time
         """,
         conn,
@@ -176,7 +176,7 @@ def admin_courses():
                         conn = get_connection()
                         conn.execute(
                             "INSERT INTO courses (code, name, room, schedule_day, schedule_time, instructor_id) "
-                            "VALUES (?, ?, ?, ?, ?, ?)",
+                            "VALUES (%s, %s, %s, %s, %s, %s)",
                             (code.upper().strip(), name.strip(), room.strip(), day, time_str, uid),
                         )
                         conn.commit()
@@ -188,7 +188,7 @@ def admin_courses():
 
     conn = get_connection()
     courses = conn.execute(
-        "SELECT * FROM courses WHERE instructor_id = ? ORDER BY code", (uid,)
+        "SELECT * FROM courses WHERE instructor_id = %s ORDER BY code", (uid,)
     ).fetchall()
     conn.close()
 
@@ -212,7 +212,7 @@ def admin_courses():
         if col1.button("Delete", key=f"del_{c['id']}"):
             conn = get_connection()
             conn.execute(
-                "DELETE FROM courses WHERE id = ? AND instructor_id = ?", (c["id"], uid)
+                "DELETE FROM courses WHERE id = %s AND instructor_id = %s", (c["id"], uid)
             )
             conn.commit()
             conn.close()
@@ -234,7 +234,7 @@ def admin_enrollments():
         FROM enrollments e
         JOIN users u ON u.id = e.user_id
         JOIN courses c ON c.id = e.course_id
-        WHERE c.instructor_id = ?
+        WHERE c.instructor_id = %s
         ORDER BY (e.status='pending') DESC, e.requested_at DESC
         """,
         (uid,),
@@ -272,7 +272,7 @@ def admin_enrollments():
             if c1.button("✅ Approve", key=f"apv_{r['id']}"):
                 conn = get_connection()
                 conn.execute(
-                    "UPDATE enrollments SET status='approved' WHERE id = ?", (r["id"],)
+                    "UPDATE enrollments SET status='approved' WHERE id = %s", (r["id"],)
                 )
                 conn.commit()
                 conn.close()
@@ -280,7 +280,7 @@ def admin_enrollments():
             if c2.button("❌ Reject", key=f"rej_{r['id']}"):
                 conn = get_connection()
                 conn.execute(
-                    "UPDATE enrollments SET status='rejected' WHERE id = ?", (r["id"],)
+                    "UPDATE enrollments SET status='rejected' WHERE id = %s", (r["id"],)
                 )
                 conn.commit()
                 conn.close()
@@ -299,7 +299,7 @@ def admin_consultations():
         SELECT co.*, u.full_name, u.email
         FROM consultations co
         JOIN users u ON u.id = co.student_id
-        WHERE co.instructor_id = ?
+        WHERE co.instructor_id = %s
         ORDER BY (co.status='pending') DESC, co.requested_date, co.requested_time
         """,
         (uid,),
@@ -333,7 +333,7 @@ def admin_consultations():
             if c1.button("✅ Confirm", key=f"con_{r['id']}"):
                 conn = get_connection()
                 conn.execute(
-                    "UPDATE consultations SET status='confirmed' WHERE id = ?", (r["id"],)
+                    "UPDATE consultations SET status='confirmed' WHERE id = %s", (r["id"],)
                 )
                 conn.commit()
                 conn.close()
@@ -341,7 +341,7 @@ def admin_consultations():
             if c2.button("❌ Decline", key=f"dec_{r['id']}"):
                 conn = get_connection()
                 conn.execute(
-                    "UPDATE consultations SET status='rejected' WHERE id = ?", (r["id"],)
+                    "UPDATE consultations SET status='rejected' WHERE id = %s", (r["id"],)
                 )
                 conn.commit()
                 conn.close()
@@ -356,7 +356,7 @@ def admin_course_manager():
 
     conn = get_connection()
     courses = conn.execute(
-        "SELECT * FROM courses WHERE instructor_id = ? ORDER BY code", (uid,)
+        "SELECT * FROM courses WHERE instructor_id = %s ORDER BY code", (uid,)
     ).fetchall()
     conn.close()
 
@@ -384,7 +384,7 @@ def _verify_course_ownership(course_id: int) -> bool:
     uid = st.session_state.user["id"]
     conn = get_connection()
     row = conn.execute(
-        "SELECT 1 FROM courses WHERE id = ? AND instructor_id = ?", (course_id, uid)
+        "SELECT 1 FROM courses WHERE id = %s AND instructor_id = %s", (course_id, uid)
     ).fetchone()
     conn.close()
     return row is not None
@@ -411,7 +411,7 @@ def manage_announcements(course_id: int):
                 conn = get_connection()
                 conn.execute(
                     "INSERT INTO announcements (course_id, title, content, type) "
-                    "VALUES (?, ?, ?, ?)",
+                    "VALUES (%s, %s, %s, %s)",
                     (course_id, title.strip(), content.strip(), ann_type),
                 )
                 conn.commit()
@@ -423,7 +423,7 @@ def manage_announcements(course_id: int):
     st.subheader("Previous announcements")
     conn = get_connection()
     anns = conn.execute(
-        "SELECT * FROM announcements WHERE course_id = ? ORDER BY posted_at DESC",
+        "SELECT * FROM announcements WHERE course_id = %s ORDER BY posted_at DESC",
         (course_id,),
     ).fetchall()
     conn.close()
@@ -448,7 +448,7 @@ def manage_announcements(course_id: int):
         )
         if st.button("Delete", key=f"delann_{a['id']}"):
             conn = get_connection()
-            conn.execute("DELETE FROM announcements WHERE id = ?", (a["id"],))
+            conn.execute("DELETE FROM announcements WHERE id = %s", (a["id"],))
             conn.commit()
             conn.close()
             st.rerun()
@@ -465,7 +465,7 @@ def manage_attendance(course_id: int):
         SELECT u.id, u.full_name, u.email
         FROM users u
         JOIN enrollments e ON e.user_id = u.id
-        WHERE e.course_id = ? AND e.status = 'approved'
+        WHERE e.course_id = %s AND e.status = 'approved'
         ORDER BY u.full_name
         """,
         (course_id,),
@@ -496,8 +496,8 @@ def manage_attendance(course_id: int):
             conn.execute(
                 """
                 INSERT INTO attendance (course_id, student_id, date, status)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(course_id, student_id, date) DO UPDATE SET status = excluded.status
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT(course_id, student_id, date) DO UPDATE SET status = EXCLUDED.status
                 """,
                 (course_id, sid, att_date.isoformat(), status),
             )
@@ -513,7 +513,7 @@ def manage_attendance(course_id: int):
         SELECT a.date AS Date, u.full_name AS Student, a.status AS Status
         FROM attendance a
         JOIN users u ON u.id = a.student_id
-        WHERE a.course_id = ?
+        WHERE a.course_id = %s
         ORDER BY a.date DESC, u.full_name
         """,
         conn,
@@ -538,7 +538,7 @@ def show_enrolled_students(course_id: int):
                e.requested_at AS "Enrolled since"
         FROM users u
         JOIN enrollments e ON e.user_id = u.id
-        WHERE e.course_id = ? AND e.status = 'approved'
+        WHERE e.course_id = %s AND e.status = 'approved'
         ORDER BY u.full_name
         """,
         conn,
