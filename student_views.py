@@ -7,6 +7,32 @@ import streamlit as st
 from database import get_connection
 
 
+def _fetchall(sql: str, params=None):
+    conn = get_connection()
+    with conn.cursor() as cur:
+        cur.execute(sql, params or ())
+        rows = cur.fetchall()
+    conn.close()
+    return rows
+
+
+def _fetchone(sql: str, params=None):
+    conn = get_connection()
+    with conn.cursor() as cur:
+        cur.execute(sql, params or ())
+        row = cur.fetchone()
+    conn.close()
+    return row
+
+
+def _execute(sql: str, params=None):
+    conn = get_connection()
+    with conn.cursor() as cur:
+        cur.execute(sql, params or ())
+    conn.commit()
+    conn.close()
+
+
 def render_student():
     user = st.session_state.user
     with st.sidebar:
@@ -44,12 +70,10 @@ def render_student():
         student_schedule()
 
 
-# ----------------------------- My Courses -----------------------------
 def student_my_courses():
     user = st.session_state.user
 
-    conn = get_connection()
-    approved = conn.execute(
+    approved = _fetchall(
         """
         SELECT c.*, i.full_name AS instructor_name
         FROM courses c
@@ -59,8 +83,7 @@ def student_my_courses():
         ORDER BY c.code
         """,
         (user["id"],),
-    ).fetchall()
-    conn.close()
+    )
 
     if st.session_state.get("current_course") is None:
         st.title("My Courses")
@@ -96,8 +119,7 @@ def student_my_courses():
 def show_course_inside(course_id: int):
     user = st.session_state.user
 
-    conn = get_connection()
-    course = conn.execute(
+    course = _fetchone(
         """
         SELECT c.*, i.full_name AS instructor_name
         FROM courses c
@@ -105,12 +127,11 @@ def show_course_inside(course_id: int):
         WHERE c.id = %s
         """,
         (course_id,),
-    ).fetchone()
-    enrolled = conn.execute(
-        "SELECT 1 FROM enrollments WHERE user_id = %s AND course_id = %s AND status = 'approved'",
+    )
+    enrolled = _fetchone(
+        "SELECT 1 AS x FROM enrollments WHERE user_id = %s AND course_id = %s AND status = 'approved'",
         (user["id"], course_id),
-    ).fetchone()
-    conn.close()
+    )
 
     if not course or not enrolled:
         st.error("This course is no longer available to you.")
@@ -131,12 +152,10 @@ def show_course_inside(course_id: int):
     tab_ann, tab_att = st.tabs(["📢 Announcements", "✅ My Attendance"])
 
     with tab_ann:
-        conn = get_connection()
-        anns = conn.execute(
+        anns = _fetchall(
             "SELECT * FROM announcements WHERE course_id = %s ORDER BY posted_at DESC",
             (course_id,),
-        ).fetchall()
-        conn.close()
+        )
         if not anns:
             st.info("No announcements yet for this course.")
         else:
@@ -159,13 +178,13 @@ def show_course_inside(course_id: int):
         conn = get_connection()
         df = pd.read_sql_query(
             """
-            SELECT date AS Date, status AS Status
+            SELECT date AS "Date", status AS "Status"
             FROM attendance
-            WHERE course_id = %s AND student_id = %s
+            WHERE course_id = %(cid)s AND student_id = %(uid)s
             ORDER BY date DESC
             """,
             conn,
-            params=(course_id, user["id"]),
+            params={"cid": course_id, "uid": user["id"]},
         )
         conn.close()
         if df.empty:
@@ -174,39 +193,30 @@ def show_course_inside(course_id: int):
             st.dataframe(df, use_container_width=True, hide_index=True)
 
 
-# --------------------------- Enroll ---------------------------
 def student_enroll():
     st.title("Enroll in a Course")
     st.caption("Browse courses offered by every instructor. Pick one to request enrollment.")
     user = st.session_state.user
 
-    conn = get_connection()
-    all_courses = conn.execute(
+    all_courses = _fetchall(
         """
         SELECT c.*, i.full_name AS instructor_name, i.email AS instructor_email
         FROM courses c
         JOIN users i ON i.id = c.instructor_id
         ORDER BY i.full_name, c.code
         """
-    ).fetchall()
-    existing = {
-        r["course_id"]: r["status"]
-        for r in conn.execute(
-            "SELECT course_id, status FROM enrollments WHERE user_id = %s", (user["id"],)
-        ).fetchall()
-    }
-    conn.close()
+    )
+    existing_rows = _fetchall(
+        "SELECT course_id, status FROM enrollments WHERE user_id = %s", (user["id"],)
+    )
+    existing = {r["course_id"]: r["status"] for r in existing_rows}
 
     if not all_courses:
         st.info("No courses have been created yet.")
         return
 
-    # Filter by instructor
     instructors = sorted({c["instructor_name"] for c in all_courses})
-    picked = st.selectbox(
-        "Filter by instructor",
-        ["All instructors"] + instructors,
-    )
+    picked = st.selectbox("Filter by instructor", ["All instructors"] + instructors)
 
     shown_any = False
     for c in all_courses:
@@ -245,43 +255,32 @@ def student_enroll():
 
         if current is None:
             if st.button("Request enrollment", key=f"enr_{c['id']}"):
-                conn = get_connection()
-                conn.execute(
-                    "INSERT INTO enrollments (user_id, course_id, status) "
-                    "VALUES (%s, %s, 'pending')",
+                _execute(
+                    "INSERT INTO enrollments (user_id, course_id, status) VALUES (%s, %s, 'pending')",
                     (user["id"], c["id"]),
                 )
-                conn.commit()
-                conn.close()
                 st.rerun()
         elif current == "rejected":
             if st.button("Request again", key=f"reenr_{c['id']}"):
-                conn = get_connection()
-                conn.execute(
+                _execute(
                     "UPDATE enrollments SET status='pending' WHERE user_id = %s AND course_id = %s",
                     (user["id"], c["id"]),
                 )
-                conn.commit()
-                conn.close()
                 st.rerun()
 
     if not shown_any:
         st.info("No courses match that filter.")
 
 
-# --------------------------- Book Consultation ---------------------------
 def student_book():
     st.title("Book a Consultation")
     st.caption("Request a 1-on-1 consultation with an instructor.")
     user = st.session_state.user
 
-    # Load all instructors and admins on the platform (they can accept bookings)
-    conn = get_connection()
-    instructors = conn.execute(
+    instructors = _fetchall(
         "SELECT id, full_name, email FROM users "
         "WHERE role IN ('admin', 'instructor') ORDER BY full_name"
-    ).fetchall()
-    conn.close()
+    )
 
     if not instructors:
         st.info("No instructors are available on this platform yet.")
@@ -308,8 +307,7 @@ def student_book():
             if not topic.strip():
                 st.error("Please describe the topic.")
             else:
-                conn = get_connection()
-                conn.execute(
+                _execute(
                     """
                     INSERT INTO consultations
                         (student_id, instructor_id, requested_date, requested_time, topic, status)
@@ -323,18 +321,13 @@ def student_book():
                         topic.strip(),
                     ),
                 )
-                conn.commit()
-                conn.close()
-                st.success(
-                    f"Consultation request sent to {instructors[pick]['full_name']}."
-                )
+                st.success(f"Consultation request sent to {instructors[pick]['full_name']}.")
 
 
 def student_my_consultations():
     st.title("My Consultations")
     user = st.session_state.user
-    conn = get_connection()
-    rows = conn.execute(
+    rows = _fetchall(
         """
         SELECT co.*, i.full_name AS instructor_name
         FROM consultations co
@@ -343,8 +336,7 @@ def student_my_consultations():
         ORDER BY co.requested_date DESC, co.requested_time DESC
         """,
         (user["id"],),
-    ).fetchall()
-    conn.close()
+    )
 
     if not rows:
         st.info("No consultation requests yet.")
@@ -368,7 +360,6 @@ def student_my_consultations():
         )
 
 
-# --------------------------- Class Schedule ---------------------------
 def student_schedule():
     st.title("My Class Schedule")
     st.caption("The classes you are approved to attend.")
@@ -376,16 +367,16 @@ def student_schedule():
     conn = get_connection()
     df = pd.read_sql_query(
         """
-        SELECT c.code AS Code, c.name AS Course, i.full_name AS Instructor,
-               c.room AS Room, c.schedule_day AS Day, c.schedule_time AS Time
+        SELECT c.code AS "Code", c.name AS "Course", i.full_name AS "Instructor",
+               c.room AS "Room", c.schedule_day AS "Day", c.schedule_time AS "Time"
         FROM courses c
         JOIN enrollments e ON e.course_id = c.id
         JOIN users i ON i.id = c.instructor_id
-        WHERE e.user_id = %s AND e.status = 'approved'
+        WHERE e.user_id = %(uid)s AND e.status = 'approved'
         ORDER BY c.schedule_day, c.schedule_time
         """,
         conn,
-        params=(user["id"],),
+        params={"uid": user["id"]},
     )
     conn.close()
     if df.empty:
