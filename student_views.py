@@ -55,7 +55,7 @@ def student_my_courses():
         FROM courses c
         JOIN enrollments e ON e.course_id = c.id
         JOIN users i ON i.id = c.instructor_id
-        WHERE e.user_id = ? AND e.status = 'approved'
+        WHERE e.user_id = %s AND e.status = 'approved'
         ORDER BY c.code
         """,
         (user["id"],),
@@ -102,12 +102,12 @@ def show_course_inside(course_id: int):
         SELECT c.*, i.full_name AS instructor_name
         FROM courses c
         JOIN users i ON i.id = c.instructor_id
-        WHERE c.id = ?
+        WHERE c.id = %s
         """,
         (course_id,),
     ).fetchone()
     enrolled = conn.execute(
-        "SELECT 1 FROM enrollments WHERE user_id = ? AND course_id = ? AND status = 'approved'",
+        "SELECT 1 FROM enrollments WHERE user_id = %s AND course_id = %s AND status = 'approved'",
         (user["id"], course_id),
     ).fetchone()
     conn.close()
@@ -133,7 +133,7 @@ def show_course_inside(course_id: int):
     with tab_ann:
         conn = get_connection()
         anns = conn.execute(
-            "SELECT * FROM announcements WHERE course_id = ? ORDER BY posted_at DESC",
+            "SELECT * FROM announcements WHERE course_id = %s ORDER BY posted_at DESC",
             (course_id,),
         ).fetchall()
         conn.close()
@@ -161,7 +161,7 @@ def show_course_inside(course_id: int):
             """
             SELECT date AS Date, status AS Status
             FROM attendance
-            WHERE course_id = ? AND student_id = ?
+            WHERE course_id = %s AND student_id = %s
             ORDER BY date DESC
             """,
             conn,
@@ -192,7 +192,7 @@ def student_enroll():
     existing = {
         r["course_id"]: r["status"]
         for r in conn.execute(
-            "SELECT course_id, status FROM enrollments WHERE user_id = ?", (user["id"],)
+            "SELECT course_id, status FROM enrollments WHERE user_id = %s", (user["id"],)
         ).fetchall()
     }
     conn.close()
@@ -248,7 +248,7 @@ def student_enroll():
                 conn = get_connection()
                 conn.execute(
                     "INSERT INTO enrollments (user_id, course_id, status) "
-                    "VALUES (?, ?, 'pending')",
+                    "VALUES (%s, %s, 'pending')",
                     (user["id"], c["id"]),
                 )
                 conn.commit()
@@ -258,7 +258,7 @@ def student_enroll():
             if st.button("Request again", key=f"reenr_{c['id']}"):
                 conn = get_connection()
                 conn.execute(
-                    "UPDATE enrollments SET status='pending' WHERE user_id = ? AND course_id = ?",
+                    "UPDATE enrollments SET status='pending' WHERE user_id = %s AND course_id = %s",
                     (user["id"], c["id"]),
                 )
                 conn.commit()
@@ -313,7 +313,7 @@ def student_book():
                     """
                     INSERT INTO consultations
                         (student_id, instructor_id, requested_date, requested_time, topic, status)
-                    VALUES (?, ?, ?, ?, ?, 'pending')
+                    VALUES (%s, %s, %s, %s, %s, 'pending')
                     """,
                     (
                         user["id"],
@@ -339,7 +339,7 @@ def student_my_consultations():
         SELECT co.*, i.full_name AS instructor_name
         FROM consultations co
         JOIN users i ON i.id = co.instructor_id
-        WHERE co.student_id = ?
+        WHERE co.student_id = %s
         ORDER BY co.requested_date DESC, co.requested_time DESC
         """,
         (user["id"],),
@@ -381,7 +381,7 @@ def student_schedule():
         FROM courses c
         JOIN enrollments e ON e.course_id = c.id
         JOIN users i ON i.id = c.instructor_id
-        WHERE e.user_id = ? AND e.status = 'approved'
+        WHERE e.user_id = %s AND e.status = 'approved'
         ORDER BY c.schedule_day, c.schedule_time
         """,
         conn,
