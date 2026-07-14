@@ -34,21 +34,19 @@ def sign_up(email: str, password: str, full_name: str, role: str = "student"):
     if len(password) < 6:
         return False, "Password must be at least 6 characters."
 
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT id FROM users WHERE email = %s", (email,))
-    if cur.fetchone():
-        conn.close()
-        return False, "An account with that email already exists."
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM users WHERE email = %s", (email,))
+            if cur.fetchone():
+                return False, "An account with that email already exists."
 
-    pw_hash, salt = hash_password(password)
-    cur.execute(
-        "INSERT INTO users (email, password_hash, salt, full_name, role) "
-        "VALUES (%s, %s, %s, %s, %s)",
-        (email, pw_hash, salt, full_name, role),
-    )
-    conn.commit()
-    conn.close()
+            pw_hash, salt = hash_password(password)
+            cur.execute(
+                "INSERT INTO users (email, password_hash, salt, full_name, role) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                (email, pw_hash, salt, full_name, role),
+            )
+        conn.commit()
     label = "Instructor" if role == "instructor" else "Student"
     return True, f"{label} account created. You can now sign in."
 
@@ -57,9 +55,10 @@ def sign_in(email: str, password: str):
     email = (email or "").strip().lower()
     if not email or not password:
         return None
-    conn = get_connection()
-    row = conn.execute("SELECT * FROM users WHERE email = %s", (email,)).fetchone()
-    conn.close()
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM users WHERE email = %s", (email,))
+            row = cur.fetchone()
     if not row:
         return None
     if verify_password(password, row["password_hash"], row["salt"]):
@@ -77,38 +76,36 @@ def sign_in(email: str, password: str):
 def create_session(user_id: int, days: int = 30) -> str:
     token = secrets.token_urlsafe(32)
     expires = datetime.utcnow() + timedelta(days=days)
-    conn = get_connection()
-    conn.execute(
-        "INSERT INTO sessions (token, user_id, expires_at) VALUES (%s, %s, %s)",
-        (token, user_id, expires),
-    )
-    conn.commit()
-    conn.close()
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO sessions (token, user_id, expires_at) VALUES (%s, %s, %s)",
+                (token, user_id, expires),
+            )
+        conn.commit()
     return token
 
 
 def get_user_from_session(token: str):
     if not token:
         return None
-    conn = get_connection()
-    row = conn.execute(
-        """
-        SELECT u.id, u.email, u.full_name, u.role, s.expires_at
-        FROM sessions s
-        JOIN users u ON u.id = s.user_id
-        WHERE s.token = %s
-        """,
-        (token,),
-    ).fetchone()
-    conn.close()
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT u.id, u.email, u.full_name, u.role, s.expires_at
+                FROM sessions s
+                JOIN users u ON u.id = s.user_id
+                WHERE s.token = %s
+                """,
+                (token,),
+            )
+            row = cur.fetchone()
     if not row:
         return None
-    try:
-        exp = row["expires_at"]
-        if exp < datetime.utcnow():
-            delete_session(token)
-            return None
-    except Exception:
+    exp = row["expires_at"]
+    if exp is None or exp < datetime.utcnow():
+        delete_session(token)
         return None
     return {
         "id": row["id"],
@@ -121,7 +118,7 @@ def get_user_from_session(token: str):
 def delete_session(token: str):
     if not token:
         return
-    conn = get_connection()
-    conn.execute("DELETE FROM sessions WHERE token = %s", (token,))
-    conn.commit()
-    conn.close()
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM sessions WHERE token = %s", (token,))
+        conn.commit()

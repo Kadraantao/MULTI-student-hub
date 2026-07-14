@@ -8,29 +8,24 @@ from database import get_connection
 
 
 def _fetchall(sql: str, params=None):
-    conn = get_connection()
-    with conn.cursor() as cur:
-        cur.execute(sql, params or ())
-        rows = cur.fetchall()
-    conn.close()
-    return rows
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params or ())
+            return cur.fetchall()
 
 
 def _fetchone(sql: str, params=None):
-    conn = get_connection()
-    with conn.cursor() as cur:
-        cur.execute(sql, params or ())
-        row = cur.fetchone()
-    conn.close()
-    return row
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params or ())
+            return cur.fetchone()
 
 
 def _execute(sql: str, params=None):
-    conn = get_connection()
-    with conn.cursor() as cur:
-        cur.execute(sql, params or ())
-    conn.commit()
-    conn.close()
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params or ())
+        conn.commit()
 
 
 def render_student():
@@ -175,18 +170,17 @@ def show_course_inside(course_id: int):
                 )
 
     with tab_att:
-        conn = get_connection()
-        df = pd.read_sql_query(
-            """
-            SELECT date AS "Date", status AS "Status"
-            FROM attendance
-            WHERE course_id = %(cid)s AND student_id = %(uid)s
-            ORDER BY date DESC
-            """,
-            conn,
-            params={"cid": course_id, "uid": user["id"]},
-        )
-        conn.close()
+        with get_connection() as conn:
+            df = pd.read_sql_query(
+                """
+                SELECT date AS "Date", status AS "Status"
+                FROM attendance
+                WHERE course_id = %(cid)s AND student_id = %(uid)s
+                ORDER BY date DESC
+                """,
+                conn,
+                params={"cid": course_id, "uid": user["id"]},
+            )
         if df.empty:
             st.info("No attendance recorded yet.")
         else:
@@ -364,21 +358,20 @@ def student_schedule():
     st.title("My Class Schedule")
     st.caption("The classes you are approved to attend.")
     user = st.session_state.user
-    conn = get_connection()
-    df = pd.read_sql_query(
-        """
-        SELECT c.code AS "Code", c.name AS "Course", i.full_name AS "Instructor",
-               c.room AS "Room", c.schedule_day AS "Day", c.schedule_time AS "Time"
-        FROM courses c
-        JOIN enrollments e ON e.course_id = c.id
-        JOIN users i ON i.id = c.instructor_id
-        WHERE e.user_id = %(uid)s AND e.status = 'approved'
-        ORDER BY c.schedule_day, c.schedule_time
-        """,
-        conn,
-        params={"uid": user["id"]},
-    )
-    conn.close()
+    with get_connection() as conn:
+        df = pd.read_sql_query(
+            """
+            SELECT c.code AS "Code", c.name AS "Course", i.full_name AS "Instructor",
+                   c.room AS "Room", c.schedule_day AS "Day", c.schedule_time AS "Time"
+            FROM courses c
+            JOIN enrollments e ON e.course_id = c.id
+            JOIN users i ON i.id = c.instructor_id
+            WHERE e.user_id = %(uid)s AND e.status = 'approved'
+            ORDER BY c.schedule_day, c.schedule_time
+            """,
+            conn,
+            params={"uid": user["id"]},
+        )
     if df.empty:
         st.info("You have no approved courses yet.")
     else:

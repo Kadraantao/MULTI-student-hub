@@ -48,29 +48,24 @@ def format_time_slot(start_str: str, duration_min: int) -> str:
 
 
 def _fetchall(sql: str, params=None):
-    conn = get_connection()
-    with conn.cursor() as cur:
-        cur.execute(sql, params or ())
-        rows = cur.fetchall()
-    conn.close()
-    return rows
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params or ())
+            return cur.fetchall()
 
 
 def _fetchone(sql: str, params=None):
-    conn = get_connection()
-    with conn.cursor() as cur:
-        cur.execute(sql, params or ())
-        row = cur.fetchone()
-    conn.close()
-    return row
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params or ())
+            return cur.fetchone()
 
 
 def _execute(sql: str, params=None):
-    conn = get_connection()
-    with conn.cursor() as cur:
-        cur.execute(sql, params or ())
-    conn.commit()
-    conn.close()
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params or ())
+        conn.commit()
 
 
 def render_admin():
@@ -148,19 +143,18 @@ def admin_dashboard():
 
     st.divider()
     st.subheader("My class schedule")
-    conn = get_connection()
-    df = pd.read_sql_query(
-        """
-        SELECT code AS "Code", name AS "Course", room AS "Room",
-               schedule_day AS "Day", schedule_time AS "Time"
-        FROM courses
-        WHERE instructor_id = %(uid)s
-        ORDER BY schedule_day, schedule_time
-        """,
-        conn,
-        params={"uid": uid},
-    )
-    conn.close()
+    with get_connection() as conn:
+        df = pd.read_sql_query(
+            """
+            SELECT code AS "Code", name AS "Course", room AS "Room",
+                   schedule_day AS "Day", schedule_time AS "Time"
+            FROM courses
+            WHERE instructor_id = %(uid)s
+            ORDER BY schedule_day, schedule_time
+            """,
+            conn,
+            params={"uid": uid},
+        )
     if df.empty:
         st.info("No courses yet. Add one in **Courses**.")
     else:
@@ -459,37 +453,35 @@ def manage_attendance(course_id: int):
         )
 
     if st.button("Save attendance", type="primary", key=f"save_att_{course_id}"):
-        conn = get_connection()
-        with conn.cursor() as cur:
-            for sid, status in statuses.items():
-                cur.execute(
-                    """
-                    INSERT INTO attendance (course_id, student_id, date, status)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (course_id, student_id, date)
-                    DO UPDATE SET status = EXCLUDED.status
-                    """,
-                    (course_id, sid, att_date.isoformat(), status),
-                )
-        conn.commit()
-        conn.close()
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                for sid, status in statuses.items():
+                    cur.execute(
+                        """
+                        INSERT INTO attendance (course_id, student_id, date, status)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (course_id, student_id, date)
+                        DO UPDATE SET status = EXCLUDED.status
+                        """,
+                        (course_id, sid, att_date.isoformat(), status),
+                    )
+            conn.commit()
         st.success(f"Attendance saved for {att_date.isoformat()}.")
 
     st.divider()
     st.subheader("Attendance history")
-    conn = get_connection()
-    df = pd.read_sql_query(
-        """
-        SELECT a.date AS "Date", u.full_name AS "Student", a.status AS "Status"
-        FROM attendance a
-        JOIN users u ON u.id = a.student_id
-        WHERE a.course_id = %(cid)s
-        ORDER BY a.date DESC, u.full_name
-        """,
-        conn,
-        params={"cid": course_id},
-    )
-    conn.close()
+    with get_connection() as conn:
+        df = pd.read_sql_query(
+            """
+            SELECT a.date AS "Date", u.full_name AS "Student", a.status AS "Status"
+            FROM attendance a
+            JOIN users u ON u.id = a.student_id
+            WHERE a.course_id = %(cid)s
+            ORDER BY a.date DESC, u.full_name
+            """,
+            conn,
+            params={"cid": course_id},
+        )
     if df.empty:
         st.info("No attendance records yet.")
     else:
@@ -501,20 +493,19 @@ def show_enrolled_students(course_id: int):
         st.error("You don't own this course.")
         return
     st.subheader("Enrolled students (approved)")
-    conn = get_connection()
-    df = pd.read_sql_query(
-        """
-        SELECT u.full_name AS "Full name", u.email AS "Email",
-               e.requested_at AS "Enrolled since"
-        FROM users u
-        JOIN enrollments e ON e.user_id = u.id
-        WHERE e.course_id = %(cid)s AND e.status = 'approved'
-        ORDER BY u.full_name
-        """,
-        conn,
-        params={"cid": course_id},
-    )
-    conn.close()
+    with get_connection() as conn:
+        df = pd.read_sql_query(
+            """
+            SELECT u.full_name AS "Full name", u.email AS "Email",
+                   e.requested_at AS "Enrolled since"
+            FROM users u
+            JOIN enrollments e ON e.user_id = u.id
+            WHERE e.course_id = %(cid)s AND e.status = 'approved'
+            ORDER BY u.full_name
+            """,
+            conn,
+            params={"cid": course_id},
+        )
     if df.empty:
         st.info("No approved students yet.")
     else:
