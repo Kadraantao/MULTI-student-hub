@@ -7,7 +7,10 @@ import streamlit as st
 import extra_streamlit_components as stx
 
 from admin_views import render_admin
-from auth import sign_in, sign_up, create_session, get_user_from_session, delete_session
+from auth import (
+    sign_in, sign_up, create_session, get_user_from_session, delete_session,
+    create_password_reset_request,
+)
 from database import init_db, seed_admin
 from student_views import render_student
 
@@ -208,6 +211,19 @@ def login_screen():
                     else:
                         st.error("Invalid email or password.")
 
+            # Forgot password expander (outside the sign-in form)
+            with st.expander("Forgot your password?"):
+                with st.form("reset_request_form", clear_on_submit=True):
+                    reset_email = st.text_input(
+                        "Enter your email",
+                        key="reset_email",
+                        placeholder="you@example.com",
+                    )
+                    st.caption("Your admin will review the request and share a temporary password with you privately.")
+                    if st.form_submit_button("Request password reset"):
+                        ok, msg = create_password_reset_request(reset_email)
+                        (st.success if ok else st.error)(msg)
+
         # ---------------- Sign Up tab ----------------
         with tab_signup:
             with st.form("signup_form", clear_on_submit=False):
@@ -222,13 +238,12 @@ def login_screen():
                     horizontal=True,
                     key="signup_role",
                 )
-                # Only show instructor code field when Instructor is picked
                 if signup_role == "Instructor":
                     instructor_code = st.text_input(
                         "Instructor signup code",
                         type="password",
                         key="signup_code",
-                        help="Ask the platform admin for the code. This prevents students from signing up as instructors.",
+                        help="Ask the platform admin for the code.",
                     )
                 else:
                     instructor_code = ""

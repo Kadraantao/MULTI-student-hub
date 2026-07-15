@@ -42,6 +42,7 @@ def render_student():
                 "Book a Consultation",
                 "My Consultations",
                 "My Class Schedule",
+                "Change My Password",
             ],
             label_visibility="collapsed",
         )
@@ -63,6 +64,8 @@ def render_student():
         student_my_consultations()
     elif page == "My Class Schedule":
         student_schedule()
+    elif page == "Change My Password":
+        student_change_password()
 
 
 def student_my_courses():
@@ -376,3 +379,22 @@ def student_schedule():
         st.info("You have no approved courses yet.")
     else:
         st.dataframe(df, use_container_width=True, hide_index=True)
+
+
+def student_change_password():
+    st.title("Change My Password")
+    st.caption("Update your own password.")
+    user = st.session_state.user
+
+    with st.form("change_pw_form", clear_on_submit=True):
+        current_pw = st.text_input("Current password", type="password")
+        new_pw = st.text_input("New password (min 6 characters)", type="password")
+        confirm_pw = st.text_input("Confirm new password", type="password")
+
+        if st.form_submit_button("Change password"):
+            if new_pw != confirm_pw:
+                st.error("New passwords do not match.")
+            else:
+                from auth import change_password
+                ok, msg = change_password(user["id"], current_pw, new_pw)
+                (st.success if ok else st.error)(msg)

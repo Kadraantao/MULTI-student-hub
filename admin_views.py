@@ -84,6 +84,8 @@ def render_admin():
                 "Enrollment Requests",
                 "Consultations",
                 "Course Manager",
+                "Password Reset Requests",
+                "Change My Password",
             ],
             label_visibility="collapsed",
         )
@@ -102,6 +104,10 @@ def render_admin():
         admin_consultations()
     elif page == "Course Manager":
         admin_course_manager()
+    elif page == "Password Reset Requests":
+        admin_password_resets()
+    elif page == "Change My Password":
+        admin_change_password()
 
 
 def admin_dashboard():
@@ -510,3 +516,90 @@ def show_enrolled_students(course_id: int):
         st.info("No approved students yet.")
     else:
         st.dataframe(df, use_container_width=True, hide_index=True)
+
+
+def admin_password_resets():
+    st.title("Password Reset Requests")
+    st.caption("Approve or reject reset requests from students and instructors. "
+               "Share the temporary password privately with the user (WhatsApp, email, in person).")
+
+    rows = _fetchall(
+        """
+        SELECT pr.id, pr.status, pr.temp_password, pr.requested_at,
+               u.full_name, u.email, u.role
+        FROM password_resets pr
+        JOIN users u ON u.id = pr.user_id
+        ORDER BY (pr.status = 'pending') DESC, pr.requested_at DESC
+        """
+    )
+
+    if not rows:
+        st.info("No password reset requests yet.")
+        return
+
+    status_filter = st.selectbox("Filter", ["All", "Pending", "Approved", "Rejected"])
+
+    for r in rows:
+        if status_filter != "All" and r["status"] != status_filter.lower():
+            continue
+
+        chip_class = f"chip-{r['status']}"
+        st.markdown(
+            f"""
+            <div class="card">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <strong>{r['full_name']}</strong>
+                        <span style="color:#666;">({r['email']})</span><br>
+                        <span style="color:#333;">Role: <strong>{r['role']}</strong> · Requested: {r['requested_at']}</span>
+                    </div>
+                    <span class="chip {chip_class}">{r['status'].upper()}</span>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if r["status"] == "pending":
+            c1, c2, _ = st.columns([1, 1, 6])
+            if c1.button("✅ Approve & generate temp password", key=f"pr_apv_{r['id']}"):
+                from auth import approve_password_reset
+                ok, msg, temp_pw = approve_password_reset(r["id"])
+                if ok:
+                    st.success(msg)
+                    st.info(
+                        f"**Share these credentials with {r['full_name']} PRIVATELY**\n\n"
+                        f"**Email:** {r['email']}\n\n"
+                        f"**Temporary password:** `{temp_pw}`\n\n"
+                        f"Tell them to sign in and change their password via **Change My Password** immediately."
+                    )
+                else:
+                    st.error(msg)
+            if c2.button("❌ Reject", key=f"pr_rej_{r['id']}"):
+                from auth import reject_password_reset
+                reject_password_reset(r["id"])
+                st.rerun()
+
+        elif r["status"] == "approved" and r["temp_password"]:
+            with st.expander("Show temporary password again"):
+                st.code(r["temp_password"])
+                st.caption("Share with the user privately if they haven't signed in yet.")
+
+
+def admin_change_password():
+    st.title("Change My Password")
+    st.caption("Update your own password.")
+    user = st.session_state.user
+
+    with st.form("change_pw_form", clear_on_submit=True):
+        current_pw = st.text_input("Current password", type="password")
+        new_pw = st.text_input("New password (min 6 characters)", type="password")
+        confirm_pw = st.text_input("Confirm new password", type="password")
+
+        if st.form_submit_button("Change password"):
+            if new_pw != confirm_pw:
+                st.error("New passwords do not match.")
+            else:
+                from auth import change_password
+                ok, msg = change_password(user["id"], current_pw, new_pw)
+                (st.success if ok else st.error)(msg)

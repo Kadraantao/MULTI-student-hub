@@ -1,4 +1,4 @@
-"""Authentication helpers: password hashing, sign up, sign in, sessions."""
+"""Authentication helpers: password hashing, sign up, sign in, sessions, password resets."""
 import hashlib
 import secrets
 from datetime import datetime, timedelta
@@ -122,3 +122,94 @@ def delete_session(token: str):
         with conn.cursor() as cur:
             cur.execute("DELETE FROM sessions WHERE token = %s", (token,))
         conn.commit()
+
+
+# ---------------- Password reset helpers ----------------
+
+def create_password_reset_request(email: str):
+    """User requests a password reset. Returns (ok, message)."""
+    email = (email or "").strip().lower()
+    if not email:
+        return False, "Please enter your email."
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM users WHERE email = %s", (email,))
+            user = cur.fetchone()
+            if not user:
+                # Don't reveal whether the email exists
+                return True, "If that email exists in our system, your instructor will review the request."
+            cur.execute(
+                "SELECT id FROM password_resets WHERE user_id = %s AND status = 'pending'",
+                (user["id"],),
+            )
+            if cur.fetchone():
+                return True, "You already have a pending reset request. Please wait for the admin to review it."
+            cur.execute(
+                "INSERT INTO password_resets (user_id, status) VALUES (%s, 'pending')",
+                (user["id"],),
+            )
+        conn.commit()
+    return True, "Reset request submitted. Please wait for the admin to approve it and share your temporary password privately."
+
+
+def approve_password_reset(reset_id: int):
+    """Admin approves a reset. Generates a temp password. Returns (ok, message, temp_password)."""
+    temp_pw = secrets.token_urlsafe(9)
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT user_id FROM password_resets WHERE id = %s AND status = 'pending'",
+                (reset_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return False, "This request no longer exists or was already handled.", ""
+            user_id = row["user_id"]
+
+            pw_hash, salt = hash_password(temp_pw)
+            cur.execute(
+                "UPDATE users SET password_hash = %s, salt = %s WHERE id = %s",
+                (pw_hash, salt, user_id),
+            )
+            cur.execute(
+                "UPDATE password_resets SET status = 'approved', temp_password = %s, resolved_at = NOW() WHERE id = %s",
+                (temp_pw, reset_id),
+            )
+            cur.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
+        conn.commit()
+    return True, "Reset approved. Share the temporary password with the user privately.", temp_pw
+
+
+def reject_password_reset(reset_id: int):
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE password_resets SET status = 'rejected', resolved_at = NOW() "
+                "WHERE id = %s AND status = 'pending'",
+                (reset_id,),
+            )
+        conn.commit()
+    return True
+
+
+def change_password(user_id: int, current_password: str, new_password: str):
+    """Change password for the signed-in user."""
+    if not current_password or not new_password:
+        return False, "Both fields are required."
+    if len(new_password) < 6:
+        return False, "New password must be at least 6 characters."
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT password_hash, salt FROM users WHERE id = %s", (user_id,))
+            row = cur.fetchone()
+            if not row:
+                return False, "User not found."
+            if not verify_password(current_password, row["password_hash"], row["salt"]):
+                return False, "Current password is incorrect."
+            pw_hash, salt = hash_password(new_password)
+            cur.execute(
+                "UPDATE users SET password_hash = %s, salt = %s WHERE id = %s",
+                (pw_hash, salt, user_id),
+            )
+        conn.commit()
+    return True, "Password changed successfully. Sign out and sign back in to test."

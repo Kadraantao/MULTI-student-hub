@@ -20,7 +20,7 @@ def _get_pool():
     """One connection pool per app instance, reused across all reruns."""
     from psycopg_pool import ConnectionPool
     try:
-       return ConnectionPool(
+        return ConnectionPool(
             _get_db_url(),
             min_size=1,
             max_size=5,
@@ -123,6 +123,17 @@ def init_db():
                     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                     expires_at TIMESTAMP NOT NULL,
                     created_at TIMESTAMP DEFAULT NOW()
+                );
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS password_resets (
+                    id             SERIAL PRIMARY KEY,
+                    user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    status         TEXT NOT NULL DEFAULT 'pending'
+                                   CHECK(status IN ('pending', 'approved', 'rejected')),
+                    temp_password  TEXT,
+                    requested_at   TIMESTAMP DEFAULT NOW(),
+                    resolved_at    TIMESTAMP
                 );
             """)
         conn.commit()
