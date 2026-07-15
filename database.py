@@ -20,11 +20,11 @@ def _get_pool():
     """One connection pool per app instance, reused across all reruns."""
     from psycopg_pool import ConnectionPool
     try:
-        return ConnectionPool(
+       return ConnectionPool(
             _get_db_url(),
             min_size=1,
             max_size=5,
-            kwargs={"row_factory": dict_row},
+            kwargs={"row_factory": dict_row, "prepare_threshold": None},
         )
     except OperationalError as exc:
         msg = str(exc)
